@@ -21,6 +21,10 @@ depends:
     depends:
       (>):
       - gaming/deps.bst
+- arch == "x86_64":
+    depends:
+      (>):
+      - bluefin/tuxedo-drivers.bst
 
 public:
   bst:
@@ -31,6 +35,25 @@ public:
       # so this is the deterministic winner. No [zramN] section = no zram device.
       - printf '# zram disabled; Dakota swaps via zswap + /var/swap/swapfile\n' > /usr/lib/systemd/zram-generator.conf
 
+      # Re-run depmod against the composed root so modprobe sees
+      # out-of-tree modules (e.g. tuxedo-drivers) alongside in-tree modules.
+      - |
+        KVER=""
+        for d in /usr/lib/modules/*; do
+            if [ -d "$d" ]; then
+                if [ -n "$KVER" ]; then
+                    echo "FATAL: multiple kernel directories found under /usr/lib/modules: $KVER and $(basename "$d")" >&2
+                    exit 1
+                fi
+                KVER=$(basename "$d")
+            fi
+        done
+        if [ -n "$KVER" ]; then
+            depmod -a "$KVER"
+        fi
+
+      # Compile udev hwdb quirks (e.g. tuxedo-drivers keyboard/sensor quirks) into hwdb.bin
+      - systemd-hwdb update
       - rm -rfv /boot /run
 
       # Required for bootc to create the image
