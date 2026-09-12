@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly Dakota countme report to Fedora infrastructure
+Documentation=https://github.com/projectbluefin/dakota
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=86400
+Persistent=true
+
+[Install]
+WantedBy=timers.target
