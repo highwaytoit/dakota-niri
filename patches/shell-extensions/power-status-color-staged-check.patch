@@ -10,8 +10,8 @@
 -];
 +// bootc starts this unit when a deployment is queued for the next boot, and
 +// stops it (running `bootc composefs-finalize-staged`) during shutdown. Dakota
-+// is composefs-backed bootc; no apt-style /run/reboot-required flag is ever
-+// written on this system.
++// uses bootc's composefs deployment backend; the apt-style
++// /run/reboot-required marker is not created on this system.
 +const BOOTC_FINALIZE_UNIT = 'bootc-finalize-staged.service';
 +
 +// Keep bus round-trips well under the status refresh interval.
@@ -181,7 +181,7 @@
 +        // Pure bootc staged deployment check.
 +        //
 +        // `bootc status` cannot be used here: it opens the sysroot for write and
-+        // refuses to run as a non-root user, so it always fails inside the Shell
++        // the shipped bootc refuses non-root callers, so it fails inside the Shell
 +        // process. bootc starts its finalize unit when a deployment is queued for
 +        // the next boot, and systemd's unit state is readable on the system bus
 +        // without privileges.
