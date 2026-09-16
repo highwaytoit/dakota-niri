@@ -58,11 +58,18 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
   and both `bootc status --format=json` and `bootc status --booted
   --format=json` fail with "This command must be executed as the root user" —
   so no unprivileged process (desktop session, GNOME Shell extension, user
-  service) can read deployment state from it. bootc starts
-  `bootc-finalize-staged.service` when a deployment is queued for the next
-  boot, and systemd unit state is readable on the system bus without
-  privileges; query that unit. `/run/reboot-required` is an apt-style marker
-  that bootc does not create.
+  service) can read deployment state from it. Read
+  `/run/composefs/staged-deployment` instead: bootc atomically writes this file
+  when it stages a deployment and removes it when the staged deployment is
+  discarded, bootc's own status code parses it, and it is world readable
+  (`0644` inside a `0755` directory). Its `finalization_locked` field is
+  bootc's `download_only`: when `true` the image is staged but will not be
+  finalized on reboot, so only `finalization_locked: false` means a reboot
+  applies the update. Do not infer staging from
+  `bootc-finalize-staged.service` being active — bootc starts that unit
+  *before* an upgrade or switch begins, so it is active during an operation
+  that has not staged anything yet. `/run/reboot-required` is an apt-style
+  marker that bootc does not create.
 
 ## Common Rationalizations
 
@@ -83,6 +90,8 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 - Any unprivileged component (Shell extension, user unit, desktop script) calling `bootc status`
 - Code keying reboot-pending state off `/run/reboot-required`, which nothing on this image creates
 - References to `ostree-finalize-staged.service` or `/ostree/deploy` in Dakota code or docs
+- Treating any staged deployment as a pending reboot without checking `finalization_locked`
+- Treating `bootc-finalize-staged.service` activity as proof that a deployment is staged
 
 ## Verification
 
@@ -98,3 +107,6 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 - [`references/local-ota.md`](references/local-ota.md)
 - [`elements/oci/`](../../../elements/oci/)
 - [`files/firstboot/`](../../../files/firstboot/)
+- [bootc `StagedDeployment` (`depl_id`, `finalization_locked`)](https://github.com/bootc-dev/bootc/blob/main/crates/lib/src/bootc_composefs/status.rs)
+- [bootc writes/removes the staged marker](https://github.com/bootc-dev/bootc/blob/main/crates/lib/src/bootc_composefs/state.rs)
+- [bootc starts the finalize unit before upgrade or switch](https://github.com/bootc-dev/bootc/blob/main/crates/lib/src/bootc_composefs/service.rs)

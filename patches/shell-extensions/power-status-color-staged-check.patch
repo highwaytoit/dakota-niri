@@ -1,6 +1,6 @@
 --- a/extension.js
 +++ b/extension.js
-@@ -9,10 +9,14 @@
+@@ -9,10 +9,13 @@
  const CLASS_OVERDUE = 'power-status-overdue';
  const CLASS_REBOOT = 'power-status-reboot';
  
@@ -8,60 +8,41 @@
 -    '/run/reboot-required',
 -    '/var/run/reboot-required',
 -];
-+// bootc starts this unit when a deployment is queued for the next boot, and
-+// stops it (running `bootc composefs-finalize-staged`) during shutdown. Dakota
-+// uses bootc's composefs deployment backend; the apt-style
-+// /run/reboot-required marker is not created on this system.
-+const BOOTC_FINALIZE_UNIT = 'bootc-finalize-staged.service';
-+
-+// Keep bus round-trips well under the status refresh interval.
-+const DBUS_TIMEOUT_MS = 5000;
++// bootc's composefs backend records a staged deployment by atomically writing
++// this file, and removes it when the staged deployment is discarded
++// (bootc_composefs/state.rs, delete.rs). bootc's own status code treats it as
++// the source of truth, it is world readable, and unlike the finalize unit —
++// which bootc starts *before* an upgrade begins — it only exists once staging
++// has actually happened.
++const BOOTC_STAGED_DEPLOYMENT = '/run/composefs/staged-deployment';
  
  function loadFileAsync(file, cancellable) {
      return new Promise((resolve) => {
-@@ -27,37 +31,54 @@
-     });
- }
- 
+@@ -24,41 +27,6 @@
+                 resolve(null);
+             }
+         });
+-    });
+-}
+-
 -function runCommandAsync(argv, cancellable) {
-+function systemdUnitActiveAsync(unitName, cancellable) {
-     return new Promise((resolve) => {
+-    return new Promise((resolve) => {
 -        try {
 -            const proc = new Gio.Subprocess({
 -                argv,
 -                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
 -            });
 -            proc.init(cancellable);
-+        const bus = Gio.DBus.system;
- 
+-
 -            let cancelId = 0;
 -            if (cancellable) {
 -                cancelId = cancellable.connect(() => {
-+        const readActiveState = (objectPath) => {
-+            bus.call(
-+                'org.freedesktop.systemd1',
-+                objectPath,
-+                'org.freedesktop.DBus.Properties',
-+                'Get',
-+                new GLib.Variant('(ss)', ['org.freedesktop.systemd1.Unit', 'ActiveState']),
-+                new GLib.VariantType('(v)'),
-+                Gio.DBusCallFlags.NONE,
-+                DBUS_TIMEOUT_MS,
-+                cancellable,
-+                (conn, res) => {
-                     try {
+-                    try {
 -                        proc.force_exit();
 -                    } catch {}
-+                        const [wrapped] = conn.call_finish(res).deepUnpack();
-+                        const state = wrapped.deepUnpack();
-+                        resolve(state === 'active' || state === 'activating');
-+                    } catch {
-+                        resolve(false);
-+                    }
-                 });
+-                });
 -            }
-+        };
- 
+-
 -            proc.communicate_utf8_async(null, cancellable, (p, res) => {
 -                if (cancelId && cancellable) {
 -                    cancellable.disconnect(cancelId);
@@ -73,38 +54,19 @@
 -                    resolve(null);
 -                }
 -            });
-+        try {
-+            bus.call(
-+                'org.freedesktop.systemd1',
-+                '/org/freedesktop/systemd1',
-+                'org.freedesktop.systemd1.Manager',
-+                'GetUnit',
-+                new GLib.Variant('(s)', [unitName]),
-+                new GLib.VariantType('(o)'),
-+                Gio.DBusCallFlags.NONE,
-+                DBUS_TIMEOUT_MS,
-+                cancellable,
-+                (conn, res) => {
-+                    try {
-+                        const [objectPath] = conn.call_finish(res).deepUnpack();
-+                        readActiveState(objectPath);
-+                    } catch {
-+                        // NoSuchUnit: nothing is staged for the next boot.
-+                        resolve(false);
-+                    }
-+                });
-         } catch {
+-        } catch {
 -            resolve(null);
-+            resolve(false);
-         }
+-        }
      });
  }
-@@ -67,24 +88,7 @@
+ 
+@@ -67,24 +35,18 @@
          this._enabled = true;
          this._cancellable = new Gio.Cancellable();
  
 -        // 1. Monitor /run directory for reboot-required flags
--        try {
++        // 1. React immediately when bootc stages or discards a deployment
+         try {
 -            const runDir = Gio.File.new_for_path('/run');
 -            this._fileMonitor = runDir.monitor_directory(
 -                Gio.FileMonitorFlags.NONE,
@@ -116,25 +78,22 @@
 -                    this._checkStatus();
 -                }
 -            });
--        } catch (e) {
++            this._stagedMonitor = Gio.File.new_for_path(BOOTC_STAGED_DEPLOYMENT)
++                .monitor_file(Gio.FileMonitorFlags.NONE, this._cancellable);
++            this._stagedMonitorId = this._stagedMonitor.connect('changed',
++                () => this._checkStatus());
+         } catch (e) {
 -            console.error(`[PowerStatusColor] Failed to monitor /run: ${e.message}`);
--        }
--
++            // Without the monitor the periodic poll still covers the state.
++            console.error(`[PowerStatusColor] Failed to monitor ${BOOTC_STAGED_DEPLOYMENT}: ${e.message}`);
+         }
+ 
 -        // 2. Periodic poll every 5 minutes
-+        // 1. Periodic poll every 5 minutes
++        // 2. Periodic poll as a backstop
          this._timeoutId = GLib.timeout_add_seconds(
              GLib.PRIORITY_DEFAULT,
              CHECK_INTERVAL_SECONDS,
-@@ -94,7 +98,7 @@
-             }
-         );
- 
--        // 3. Initial check
-+        // 2. Initial check
-         this._checkStatus();
-     }
- 
-@@ -106,15 +110,6 @@
+@@ -106,13 +68,13 @@
              this._timeoutId = null;
          }
  
@@ -142,15 +101,19 @@
 -            if (this._monitorId) {
 -                this._fileMonitor.disconnect(this._monitorId);
 -                this._monitorId = null;
--            }
++        if (this._stagedMonitor) {
++            if (this._stagedMonitorId) {
++                this._stagedMonitor.disconnect(this._stagedMonitorId);
++                this._stagedMonitorId = null;
+             }
 -            this._fileMonitor.cancel();
 -            this._fileMonitor = null;
--        }
--
++            this._stagedMonitor.cancel();
++            this._stagedMonitor = null;
+         }
+ 
          if (this._cancellable) {
-             this._cancellable.cancel();
-             this._cancellable = null;
-@@ -193,30 +188,14 @@
+@@ -193,30 +155,26 @@
      }
  
      async _checkRebootPending() {
@@ -163,9 +126,23 @@
 -                // Ignore query error
 -            }
 -        }
--
++        // Pure bootc staged deployment check.
++        //
++        // `bootc status` cannot be used here: it opens the sysroot for write and
++        // the shipped bootc refuses non-root callers, so it fails inside the
++        // Shell process. The marker bootc writes for its own status code is
++        // world readable, so read that instead.
++        //
++        // `finalization_locked` is bootc's `download_only`: the image is staged
++        // but will not be finalized on reboot, so it is not a pending reboot
++        // until `bootc update --apply` clears the flag.
++        const content = await loadFileAsync(
++            Gio.File.new_for_path(BOOTC_STAGED_DEPLOYMENT), this._cancellable);
++        if (!content)
++            return false;
+ 
 -        // 2. Pure bootc staged deployment check (bootc documentation convention)
--        try {
+         try {
 -            const stdout = await runCommandAsync(['bootc', 'status', '--format=json'], this._cancellable);
 -            if (stdout) {
 -                const data = JSON.parse(stdout);
@@ -173,19 +150,13 @@
 -                if (data?.status?.staged != null)
 -                    return true;
 -            }
--        } catch {
++            return JSON.parse(content).finalization_locked === false;
+         } catch {
 -            // Transient error (e.g. sysroot lock held during pull or permissions)
--        }
++            return false;
+         }
 -
 -        return false;
-+        // Pure bootc staged deployment check.
-+        //
-+        // `bootc status` cannot be used here: it opens the sysroot for write and
-+        // the shipped bootc refuses non-root callers, so it fails inside the Shell
-+        // process. bootc starts its finalize unit when a deployment is queued for
-+        // the next boot, and systemd's unit state is readable on the system bus
-+        // without privileges.
-+        return systemdUnitActiveAsync(BOOTC_FINALIZE_UNIT, this._cancellable);
      }
  
      _applyStyle(className) {
