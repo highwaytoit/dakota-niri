@@ -5,6 +5,8 @@ sources:
   url: github:projectbluefin/bluefin-bling.git
   track: main
   ref: f3ed7af099a79b85f18fb5f62eb6bf208239cb0b
+- kind: patch
+  path: patches/shell-extensions/power-status-color-staged-check.patch
 
 build-depends:
 - core/sandbox-tools.bst
