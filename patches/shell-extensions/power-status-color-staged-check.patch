@@ -1,0 +1,125 @@
+--- a/extension.js
++++ b/extension.js
+@@ -14,6 +14,13 @@
+     '/var/run/reboot-required',
+ ];
+ 
++// bootc starts this unit as soon as a deployment is queued for the next boot,
++// and stops it (running `bootc composefs-finalize-staged`) during shutdown.
++const BOOTC_FINALIZE_UNIT = 'bootc-finalize-staged.service';
++
++// Keep bus round-trips well under the status refresh interval.
++const DBUS_TIMEOUT_MS = 5000;
++
+ function loadFileAsync(file, cancellable) {
+     return new Promise((resolve) => {
+         file.load_contents_async(cancellable, (f, res) => {
+@@ -27,37 +34,54 @@
+     });
+ }
+ 
+-function runCommandAsync(argv, cancellable) {
++function systemdUnitActiveAsync(unitName, cancellable) {
+     return new Promise((resolve) => {
+-        try {
+-            const proc = new Gio.Subprocess({
+-                argv,
+-                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+-            });
+-            proc.init(cancellable);
++        const bus = Gio.DBus.system;
+ 
+-            let cancelId = 0;
+-            if (cancellable) {
+-                cancelId = cancellable.connect(() => {
++        const readActiveState = (objectPath) => {
++            bus.call(
++                'org.freedesktop.systemd1',
++                objectPath,
++                'org.freedesktop.DBus.Properties',
++                'Get',
++                new GLib.Variant('(ss)', ['org.freedesktop.systemd1.Unit', 'ActiveState']),
++                new GLib.VariantType('(v)'),
++                Gio.DBusCallFlags.NONE,
++                DBUS_TIMEOUT_MS,
++                cancellable,
++                (conn, res) => {
+                     try {
+-                        proc.force_exit();
+-                    } catch {}
++                        const [wrapped] = conn.call_finish(res).deepUnpack();
++                        const state = wrapped.deepUnpack();
++                        resolve(state === 'active' || state === 'activating');
++                    } catch {
++                        resolve(false);
++                    }
+                 });
+-            }
++        };
+ 
+-            proc.communicate_utf8_async(null, cancellable, (p, res) => {
+-                if (cancelId && cancellable) {
+-                    cancellable.disconnect(cancelId);
+-                }
+-                try {
+-                    const [ok, stdout] = p.communicate_utf8_finish(res);
+-                    resolve(ok ? stdout : null);
+-                } catch {
+-                    resolve(null);
+-                }
+-            });
++        try {
++            bus.call(
++                'org.freedesktop.systemd1',
++                '/org/freedesktop/systemd1',
++                'org.freedesktop.systemd1.Manager',
++                'GetUnit',
++                new GLib.Variant('(s)', [unitName]),
++                new GLib.VariantType('(o)'),
++                Gio.DBusCallFlags.NONE,
++                DBUS_TIMEOUT_MS,
++                cancellable,
++                (conn, res) => {
++                    try {
++                        const [objectPath] = conn.call_finish(res).deepUnpack();
++                        readActiveState(objectPath);
++                    } catch {
++                        // NoSuchUnit: nothing is staged for the next boot.
++                        resolve(false);
++                    }
++                });
+         } catch {
+-            resolve(null);
++            resolve(false);
+         }
+     });
+ }
+@@ -203,20 +227,14 @@
+             }
+         }
+ 
+-        // 2. Pure bootc staged deployment check (bootc documentation convention)
+-        try {
+-            const stdout = await runCommandAsync(['bootc', 'status', '--format=json'], this._cancellable);
+-            if (stdout) {
+-                const data = JSON.parse(stdout);
+-                // In bootc schema, status.staged is non-null when an update is queued for next boot
+-                if (data?.status?.staged != null)
+-                    return true;
+-            }
+-        } catch {
+-            // Transient error (e.g. sysroot lock held during pull or permissions)
+-        }
+-
+-        return false;
++        // 2. Pure bootc staged deployment check.
++        //
++        // `bootc status` cannot be used here: it opens the sysroot for write and
++        // refuses to run as a non-root user, so it always fails inside the Shell
++        // process. bootc instead starts its finalize unit as soon as a deployment
++        // is queued for the next boot, and systemd's unit state is readable on the
++        // system bus without privileges.
++        return systemdUnitActiveAsync(BOOTC_FINALIZE_UNIT, this._cancellable);
+     }
+ 
+     _applyStyle(className) {
