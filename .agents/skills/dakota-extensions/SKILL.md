@@ -71,6 +71,7 @@ Dakota packages curated GNOME Shell extensions built from source or upstream rep
 - **ESM Architecture**: GNOME 45+ requires standard JavaScript ESM imports (`import ... from 'resource:///org/gnome/shell/...'`). Legacy `imports.*` syntax is prohibited.
 - **UUID Directory Invariant**: The installed extension folder under `%{datadir}/gnome-shell/extensions/` must match `metadata.json`'s `.uuid` string exactly.
 - **Pure bootc Compliance**: Extensions must rely only on system services and pure bootc APIs. No dependencies on `rpm-ostree` or mutable package installers.
+- **Unprivileged System State**: Extensions run inside the user's GNOME Shell process and have no root. Dakota's composefs bootc rejects `bootc status` for non-root callers, so system state must come from an interface a session can actually read — systemd unit state on the system bus (`bootc-finalize-staged.service` is active exactly while a deployment is staged), a world-readable file, or a D-Bus service. Subprocess probes that need privileges fail silently inside a `catch` and leave the feature permanently inert.
 - **Schema Compilation**: Extensions with custom GSettings must include compiled schemas (`gschemas.compiled`) in their directory or rely on Dakota's root schema compiler during OCI assembly.
 - **Disabled Binaries Strip**: Set `variables: { strip-binaries: "" }` in extension manual elements since extension JS/CSS files do not contain ELF binaries.
 

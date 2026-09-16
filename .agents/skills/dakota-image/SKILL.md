@@ -46,6 +46,21 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 - **Linker Cache Load-Bearing Invariant**: `ldconfig -r /layer` must execute after all library updates and before `build-oci`. Any command altering `/usr/lib` must precede `ldconfig`.
 - **Installer Separation**: Installer-specific Flatpaks or setup tools are purged on first boot via `files/firstboot/`. Installer UI changes belong in `projectbluefin/bootc-installer`, not Dakota.
 - **Evidence Before Assertion**: Never assert boot success without executing one of the boot test recipes.
+- **composefs-backed bootc**: Dakota's deployments are composefs, not classic
+  OSTree checkouts. `/ostree/bootc` is a symlink to `../composefs/bootc`, there
+  is no `/ostree/deploy`, and the staged deployment is finalized by
+  `bootc-finalize-staged.service` (`ExecStop=/usr/bin/bootc
+  composefs-finalize-staged`), never `ostree-finalize-staged.service`. Code and
+  documentation that assume the ostree-named unit or deploy directory are wrong
+  for this image.
+- **Staged-deployment detection is privilege-split**: `bootc status` in any
+  form opens the sysroot for write and fails for non-root callers, so no
+  unprivileged process (desktop session, GNOME Shell extension, user service)
+  can read deployment state from it. bootc starts
+  `bootc-finalize-staged.service` the moment a deployment is queued for the
+  next boot, and systemd unit state is readable on the system bus without
+  privileges; query that unit instead. `/run/reboot-required` is an apt
+  convention and is never written on bootc.
 
 ## Common Rationalizations
 
@@ -54,6 +69,8 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 | "The element built, so the layer is fine." | Build success does not guarantee runtime inclusion or correct compose filters. |
 | "I can put `ldconfig` anywhere in the post-install list." | If run before schema or dconf steps that copy libraries, `/etc/ld.so.cache` will be stale on boot. |
 | "Booting in QEMU isn't necessary for a small change." | Desktop regression (e.g. GDM loop) only manifests at real boot. |
+| "bootc is ostree underneath, so the ostree unit and paths apply." | Dakota deploys composefs. `ostree-finalize-staged.service` and `/ostree/deploy` do not exist here; `bootc-finalize-staged.service` and `/composefs/bootc` do. |
+| "The extension can just shell out to `bootc status --format=json`." | It runs unprivileged and bootc refuses non-root callers, so the call always fails. A swallowed error then reads as "nothing staged" forever. |
 
 ## Red Flags
 
@@ -61,6 +78,9 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 - New post-install commands inserted after `ldconfig -r /layer`
 - Using `rpm-ostree` or `dnf` in layer integration scripts
 - Modifying live installer code directly in Dakota instead of upstream repos
+- Any unprivileged component (Shell extension, user unit, desktop script) calling `bootc status`
+- Code keying reboot-pending state off `/run/reboot-required` on a bootc system
+- References to `ostree-finalize-staged.service` or `/ostree/deploy` in Dakota code or docs
 
 ## Verification
 
