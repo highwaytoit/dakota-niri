@@ -68,6 +68,9 @@ Copilot. Load only the skill matching the task; do not read every skill.
 - BuildStream elements are the only package/build mechanism.
 - OCI filesystem-producing layers use `kind: compose`; `kind: stack` only
   aggregates dependencies and produces no filesystem output.
+- Dakota uses bootc's composefs deployment backend: `bootc-finalize-staged.service`
+  and `bootc composefs-finalize-staged`, never `ostree-finalize-staged.service`
+  or `/ostree/deploy`. See `dakota-image` for staged-deployment detection.
 - Cargo source blocks are generated with
   `python3 files/scripts/generate_cargo_sources.py <Cargo.lock>`.
 - Patch junctions through `patch_queue`; do not edit staged junction contents.

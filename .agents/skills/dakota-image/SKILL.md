@@ -46,21 +46,23 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 - **Linker Cache Load-Bearing Invariant**: `ldconfig -r /layer` must execute after all library updates and before `build-oci`. Any command altering `/usr/lib` must precede `ldconfig`.
 - **Installer Separation**: Installer-specific Flatpaks or setup tools are purged on first boot via `files/firstboot/`. Installer UI changes belong in `projectbluefin/bootc-installer`, not Dakota.
 - **Evidence Before Assertion**: Never assert boot success without executing one of the boot test recipes.
-- **composefs-backed bootc**: Dakota's deployments are composefs, not classic
-  OSTree checkouts. `/ostree/bootc` is a symlink to `../composefs/bootc`, there
-  is no `/ostree/deploy`, and the staged deployment is finalized by
-  `bootc-finalize-staged.service` (`ExecStop=/usr/bin/bootc
-  composefs-finalize-staged`), never `ostree-finalize-staged.service`. Code and
-  documentation that assume the ostree-named unit or deploy directory are wrong
-  for this image.
+- **composefs deployment backend**: Dakota uses bootc's composefs backend, not
+  classic OSTree checkouts. `/ostree/bootc` is a symlink to
+  `../composefs/bootc`, there is no `/ostree/deploy`, and the staged deployment
+  is finalized by `bootc-finalize-staged.service`
+  (`ExecStop=/usr/bin/bootc composefs-finalize-staged`), never
+  `ostree-finalize-staged.service`. Code or documentation assuming the
+  ostree-named unit or deploy directory is wrong for this image.
 - **Staged-deployment detection is privilege-split**: `bootc status` in any
   form opens the sysroot for write and fails for non-root callers, so no
   unprivileged process (desktop session, GNOME Shell extension, user service)
   can read deployment state from it. bootc starts
-  `bootc-finalize-staged.service` the moment a deployment is queued for the
-  next boot, and systemd unit state is readable on the system bus without
-  privileges; query that unit instead. `/run/reboot-required` is an apt
-  convention and is never written on bootc.
+  `bootc-finalize-staged.service` when a deployment is queued for the next boot
+  — it is `static`, has no `ExecStart`, and nothing pulls it in at boot, so an
+  activation timestamp later than boot means a deployment was staged — and
+  systemd unit state is readable on the system bus without privileges. Query
+  that unit instead. `/run/reboot-required` is an apt convention and is never
+  written on bootc.
 
 ## Common Rationalizations
 
