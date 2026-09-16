@@ -1,20 +1,25 @@
 --- a/extension.js
 +++ b/extension.js
-@@ -14,6 +14,13 @@
-     '/var/run/reboot-required',
- ];
+@@ -9,10 +9,14 @@
+ const CLASS_OVERDUE = 'power-status-overdue';
+ const CLASS_REBOOT = 'power-status-reboot';
  
-+// bootc starts this unit as soon as a deployment is queued for the next boot,
-+// and stops it (running `bootc composefs-finalize-staged`) during shutdown.
+-const REBOOT_FLAG_FILES = [
+-    '/run/reboot-required',
+-    '/var/run/reboot-required',
+-];
++// bootc starts this unit when a deployment is queued for the next boot, and
++// stops it (running `bootc composefs-finalize-staged`) during shutdown. Dakota
++// is composefs-backed bootc; no apt-style /run/reboot-required flag is ever
++// written on this system.
 +const BOOTC_FINALIZE_UNIT = 'bootc-finalize-staged.service';
 +
 +// Keep bus round-trips well under the status refresh interval.
 +const DBUS_TIMEOUT_MS = 5000;
-+
+ 
  function loadFileAsync(file, cancellable) {
      return new Promise((resolve) => {
-         file.load_contents_async(cancellable, (f, res) => {
-@@ -27,37 +34,54 @@
+@@ -27,37 +31,54 @@
      });
  }
  
@@ -94,10 +99,71 @@
          }
      });
  }
-@@ -203,20 +227,14 @@
+@@ -67,24 +88,7 @@
+         this._enabled = true;
+         this._cancellable = new Gio.Cancellable();
+ 
+-        // 1. Monitor /run directory for reboot-required flags
+-        try {
+-            const runDir = Gio.File.new_for_path('/run');
+-            this._fileMonitor = runDir.monitor_directory(
+-                Gio.FileMonitorFlags.NONE,
+-                this._cancellable
+-            );
+-            this._monitorId = this._fileMonitor.connect('changed', (mon, file, otherFile, eventType) => {
+-                const basename = file?.get_basename();
+-                if (basename === 'reboot-required') {
+-                    this._checkStatus();
+-                }
+-            });
+-        } catch (e) {
+-            console.error(`[PowerStatusColor] Failed to monitor /run: ${e.message}`);
+-        }
+-
+-        // 2. Periodic poll every 5 minutes
++        // 1. Periodic poll every 5 minutes
+         this._timeoutId = GLib.timeout_add_seconds(
+             GLib.PRIORITY_DEFAULT,
+             CHECK_INTERVAL_SECONDS,
+@@ -94,7 +98,7 @@
              }
+         );
+ 
+-        // 3. Initial check
++        // 2. Initial check
+         this._checkStatus();
+     }
+ 
+@@ -106,15 +110,6 @@
+             this._timeoutId = null;
          }
  
+-        if (this._fileMonitor) {
+-            if (this._monitorId) {
+-                this._fileMonitor.disconnect(this._monitorId);
+-                this._monitorId = null;
+-            }
+-            this._fileMonitor.cancel();
+-            this._fileMonitor = null;
+-        }
+-
+         if (this._cancellable) {
+             this._cancellable.cancel();
+             this._cancellable = null;
+@@ -193,30 +188,14 @@
+     }
+ 
+     async _checkRebootPending() {
+-        // 1. Check flag files
+-        for (const filePath of REBOOT_FLAG_FILES) {
+-            try {
+-                if (Gio.File.new_for_path(filePath).query_exists(null))
+-                    return true;
+-            } catch {
+-                // Ignore query error
+-            }
+-        }
+-
 -        // 2. Pure bootc staged deployment check (bootc documentation convention)
 -        try {
 -            const stdout = await runCommandAsync(['bootc', 'status', '--format=json'], this._cancellable);
@@ -112,13 +178,13 @@
 -        }
 -
 -        return false;
-+        // 2. Pure bootc staged deployment check.
++        // Pure bootc staged deployment check.
 +        //
 +        // `bootc status` cannot be used here: it opens the sysroot for write and
 +        // refuses to run as a non-root user, so it always fails inside the Shell
-+        // process. bootc instead starts its finalize unit as soon as a deployment
-+        // is queued for the next boot, and systemd's unit state is readable on the
-+        // system bus without privileges.
++        // process. bootc starts its finalize unit when a deployment is queued for
++        // the next boot, and systemd's unit state is readable on the system bus
++        // without privileges.
 +        return systemdUnitActiveAsync(BOOTC_FINALIZE_UNIT, this._cancellable);
      }
  
