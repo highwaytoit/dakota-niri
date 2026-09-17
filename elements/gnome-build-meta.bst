@@ -32,5 +32,10 @@ config:
     # Override the signed kernel modules with the plain ones
     gnomeos/initramfs/signed-modules.bst: bluefin/unsigned-modules.bst
 
+    # Work around freedesktop-sdk 25.08.16 chmod'ing shadow's removed expiry
+    # tool while preparing the image. Patching the fdsdk junction instead would
+    # rebuild the whole SDK; this only invalidates initramfs and downstream.
+    oci/initramfs.bst: bluefin/initramfs.bst
+
     plugins/buildstream-plugins.bst: plugins/buildstream-plugins.bst
     plugins/buildstream-plugins-community.bst: plugins/buildstream-plugins-community.bst
