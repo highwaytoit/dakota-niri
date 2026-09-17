@@ -4,7 +4,7 @@ sources:
 - kind: git_repo
   url: github:projectbluefin/bluefin-bling.git
   track: main
-  ref: 67e89b215e390eb136a0fdf97bad2c0eba8b5b15
+  ref: a058013f0f4bef79bdff4fece522b7287a6231dc
 
 build-depends:
 - core/sandbox-tools.bst
@@ -12,6 +12,7 @@ build-depends:
 
 depends:
 - bluefin/syncthing.bst
+- bluefin/syncthing-defaults.bst
 - gnome-build-meta.bst:sdk/glib.bst
 - gnome-build-meta.bst:core/gnome-shell.bst
 
