@@ -380,5 +380,33 @@ class SyncthingDefaultsTests(unittest.TestCase):
         self.assertIn("- bluefin/syncthing-defaults.bst", toggle)
 
 
+class PowerStatusColorTests(unittest.TestCase):
+    """The reboot indicator is patched in-tree, so its packaging is asserted here."""
+
+    PATCH = ROOT / "patches/shell-extensions/power-status-color-staged-check.patch"
+
+    def test_patch_declares_the_shell_release_the_image_ships(self) -> None:
+        """A stale shell-version only loads because validation is globally off.
+
+        Declaring the release keeps the extension loadable on its own merits, so
+        the bypass stays a convenience rather than a load-bearing dependency.
+        """
+        junction = (ROOT / "elements/gnome-build-meta.bst").read_text()
+        track = re.search(r"^\s*track:\s*gnome-(\d+)$", junction, re.M)
+        self.assertIsNotNone(track, "gnome-build-meta.bst declares no gnome-NN track")
+        self.assertIn(f'"{track.group(1)}"', self.PATCH.read_text())
+
+    def test_reboot_state_comes_from_the_bootc_marker(self) -> None:
+        """`bootc status` needs root, so a session cannot call it.
+
+        The finalize unit is not a substitute: bootc starts it before an upgrade
+        begins, so it is active while nothing is staged yet.
+        """
+        patch = self.PATCH.read_text()
+        self.assertIn("/run/composefs/staged-deployment", patch)
+        self.assertIn("finalization_locked === false", patch)
+        self.assertNotIn("bootc-finalize-staged.service", patch)
+        self.assertNotIn("/run/reboot-required", patch.split("---")[-1])
+
 if __name__ == "__main__":
     unittest.main()
