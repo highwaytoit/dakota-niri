@@ -53,7 +53,7 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
   (`ExecStop=/usr/bin/bootc composefs-finalize-staged`), never
   `ostree-finalize-staged.service`. Code or documentation assuming the
   ostree-named unit or deploy directory is wrong for this image.
-- **Staged-deployment detection is privilege-split**: the shipped bootc rejects
+- **Staged-deployment detection is privilege-split**: the shipped bootc (1.16.13) rejects
   the status subcommand for non-root callers — it opens the sysroot for write,
   and both `bootc status --format=json` and `bootc status --booted
   --format=json` fail with "This command must be executed as the root user" —
@@ -107,6 +107,6 @@ Use this skill when filesystem content crosses from BuildStream artifacts into O
 - [`references/local-ota.md`](references/local-ota.md)
 - [`elements/oci/`](../../../elements/oci/)
 - [`files/firstboot/`](../../../files/firstboot/)
-- [bootc `StagedDeployment` (`depl_id`, `finalization_locked`)](https://github.com/bootc-dev/bootc/blob/v1.16.11/crates/lib/src/bootc_composefs/status.rs)
-- [bootc writes/removes the staged marker](https://github.com/bootc-dev/bootc/blob/v1.16.11/crates/lib/src/bootc_composefs/state.rs)
-- [bootc starts the finalize unit before upgrade or switch](https://github.com/bootc-dev/bootc/blob/v1.16.11/crates/lib/src/bootc_composefs/service.rs)
+- [bootc `StagedDeployment` (`depl_id`, `finalization_locked`)](https://github.com/bootc-dev/bootc/blob/v1.16.13/crates/lib/src/bootc_composefs/status.rs)
+- [bootc writes/removes the staged marker](https://github.com/bootc-dev/bootc/blob/v1.16.13/crates/lib/src/bootc_composefs/state.rs)
+- [bootc starts the finalize unit before upgrade or switch](https://github.com/bootc-dev/bootc/blob/v1.16.13/crates/lib/src/bootc_composefs/service.rs)
