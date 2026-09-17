@@ -7,10 +7,6 @@ sources:
   ref: freedesktop-sdk-25.08.16-0-gc4f8b7234c787e8282fb9d4f208b08f9f677eba9
 - kind: patch_queue
   path: patches/freedesktop-sdk
-# Dakota-carried fixes that are not in the mirrored gnome-build-meta queue.
-# `just patch-sync` owns patches/freedesktop-sdk and must not see these.
-- kind: patch_queue
-  path: patches/freedesktop-sdk-local
 
 config:
   options:
