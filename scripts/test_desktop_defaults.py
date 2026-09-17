@@ -18,6 +18,7 @@ from xml.etree import ElementTree
 ROOT = Path(__file__).resolve().parents[1]
 CONDITION = ROOT / "files/service-overrides/flatpak-preinstall.service.d/condition-check.conf"
 EXTENSIONS = ROOT / "elements/bluefin/shell-extensions/disable-ext-validator.bst"
+POWER_STATUS_PATCH = ROOT / "patches/shell-extensions/power-status-color-staged-check.patch"
 SYNCTHING_DEFAULTS = ROOT / "elements/bluefin/syncthing-defaults.bst"
 SYNCTHING_FILES = ROOT / "files/syncthing-defaults"
 
@@ -148,6 +149,44 @@ class DesktopDefaultsTests(unittest.TestCase):
         self.assertNotIn("vicinae", keybindings.lower())
         self.assertNotIn("switch-input-source=", keybindings)
         self.assertIn("command='/usr/bin/xdg-terminal-exec'", keybindings)
+
+    def test_power_status_color_declares_the_shell_release_it_ships_on(self) -> None:
+        """A stale shell-version only loads because validation is globally off.
+
+        Declaring the release keeps the extension loadable on its own merits, so
+        the bypass stays a convenience rather than a load-bearing dependency.
+        It stays opt-in either way; that is asserted above.
+        """
+        track = re.search(
+            r"^\s*track:\s*gnome-(\d+)$", (ROOT / "elements/gnome-build-meta.bst").read_text(), re.M
+        )
+        self.assertIsNotNone(track, "gnome-build-meta.bst declares no gnome-NN track")
+        added = [
+            line[1:]
+            for line in POWER_STATUS_PATCH.read_text().splitlines()
+            if line.startswith("+") and "shell-version" in line
+        ]
+        self.assertEqual(len(added), 1, "patch adds no single shell-version line")
+        versions = json.loads("{" + added[0].rstrip(",") + "}")["shell-version"]
+        self.assertIn(track.group(1), versions)
+
+    def test_power_status_color_reads_the_bootc_staged_marker(self) -> None:
+        """`bootc status` needs root, so a session cannot call it.
+
+        The finalize unit is not a substitute: bootc starts it before an upgrade
+        begins, so it is active while nothing is staged yet.
+        """
+        # Assert on what the patch *adds*: removed lines legitimately still
+        # mention the flag files this change deletes.
+        added = "\n".join(
+            line[1:]
+            for line in POWER_STATUS_PATCH.read_text().splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+        self.assertIn("/run/composefs/staged-deployment", added)
+        self.assertIn("finalization_locked === false", added)
+        for rejected in ("bootc-finalize-staged.service", "/run/reboot-required", "Gio.Subprocess"):
+            self.assertNotIn(rejected, added)
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is required to exercise the BST metadata guard")
@@ -379,34 +418,6 @@ class SyncthingDefaultsTests(unittest.TestCase):
         toggle = (ROOT / "elements/bluefin/shell-extensions/syncthing-toggle.bst").read_text()
         self.assertIn("- bluefin/syncthing-defaults.bst", toggle)
 
-
-class PowerStatusColorTests(unittest.TestCase):
-    """The reboot indicator is patched in-tree, so its packaging is asserted here."""
-
-    PATCH = ROOT / "patches/shell-extensions/power-status-color-staged-check.patch"
-
-    def test_patch_declares_the_shell_release_the_image_ships(self) -> None:
-        """A stale shell-version only loads because validation is globally off.
-
-        Declaring the release keeps the extension loadable on its own merits, so
-        the bypass stays a convenience rather than a load-bearing dependency.
-        """
-        junction = (ROOT / "elements/gnome-build-meta.bst").read_text()
-        track = re.search(r"^\s*track:\s*gnome-(\d+)$", junction, re.M)
-        self.assertIsNotNone(track, "gnome-build-meta.bst declares no gnome-NN track")
-        self.assertIn(f'"{track.group(1)}"', self.PATCH.read_text())
-
-    def test_reboot_state_comes_from_the_bootc_marker(self) -> None:
-        """`bootc status` needs root, so a session cannot call it.
-
-        The finalize unit is not a substitute: bootc starts it before an upgrade
-        begins, so it is active while nothing is staged yet.
-        """
-        patch = self.PATCH.read_text()
-        self.assertIn("/run/composefs/staged-deployment", patch)
-        self.assertIn("finalization_locked === false", patch)
-        self.assertNotIn("bootc-finalize-staged.service", patch)
-        self.assertNotIn("/run/reboot-required", patch.split("---")[-1])
 
 if __name__ == "__main__":
     unittest.main()
