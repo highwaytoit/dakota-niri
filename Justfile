@@ -1280,7 +1280,15 @@ sbom variant="default":
     # Pinned to commit 0706fec3 (2026-04-01) — latest main, includes element
     # names in SPDX output (issue #9 fix). Switch to a versioned PyPI release
     # once the project publishes one.
+    #
+    # buildstream-sbom fetches sources, and BuildStream stages fetched sources
+    # through buildbox-fuse, so this container needs /dev/fuse and the
+    # capabilities to mount it — the same flags the `bst` recipe runs with.
+    # Without them every fetch dies in the FUSE stager and no SBOM has been
+    # published since #745 dropped --privileged (#1608).
     podman run --rm \
+        --privileged \
+        --device /dev/fuse \
         --network=host \
         --runtime runc \
         -v "{{justfile_directory()}}:/src:rw" \
