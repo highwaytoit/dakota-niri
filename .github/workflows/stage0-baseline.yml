@@ -31,10 +31,35 @@ jobs:
           podman --version
           just --version
 
+      - name: Generate local BuildStream config
+        uses: ./.github/actions/generate-bst-ci-config
+        with:
+          enable-remote-execution: "false"
+          enable-push: "false"
+
+      - name: Verify local execution and public caches
+        run: |
+          set -euo pipefail
+
+          if grep -Eq 'remote-execution:|storage-service:|cache\.projectbluefin\.io:11002' buildstream-ci.conf; then
+            echo "ERROR: Stage 0 BuildStream config contains private Bluefin remote execution/CAS settings."
+            exit 1
+          fi
+
+          grep -Fq 'https://gbm.gnome.org:11003' project.conf
+          grep -Fq 'https://cache.projectbluefin.io:11001' project.conf
+          grep -Fq 'https://cache.freedesktop-sdk.io:11001' patches/freedesktop-sdk/0001-project.conf-Add-GNOME-CAS-servers.patch
+
+          echo "Stage 0 uses local BuildStream execution with public project caches."
+
       - name: Validate default BuildStream graph
+        env:
+          BST_FLAGS: --config /src/buildstream-ci.conf
         run: just bst show --deps all oci/bluefin.bst
 
       - name: Build and export default Dakota image
+        env:
+          BST_FLAGS: --config /src/buildstream-ci.conf
         run: |
           set -euo pipefail
           mkdir -p logs
