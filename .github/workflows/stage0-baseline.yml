@@ -1,0 +1,53 @@
+name: Stage 0 Baseline Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dakota-stage0-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Build default Dakota
+    runs-on: [self-hosted, linux, x64, dakota-builder]
+    timeout-minutes: 350
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Verify runner prerequisites
+        run: |
+          set -euo pipefail
+          uname -a
+          free -h
+          df -h /
+          podman --version
+          just --version
+
+      - name: Validate default BuildStream graph
+        run: just bst show --deps all oci/bluefin.bst
+
+      - name: Build and export default Dakota image
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          just build default 2>&1 | tee logs/stage0-build.log
+
+      - name: Verify local OCI image exists
+        run: sudo podman image inspect localhost/dakota:latest >/dev/null
+
+      - name: Upload Stage 0 build log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage0-baseline-build-log
+          path: logs/stage0-build.log
+          retention-days: 7
+          if-no-files-found: ignore
