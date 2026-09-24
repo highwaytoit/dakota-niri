@@ -2,6 +2,12 @@ name: Stage 0 Baseline Build
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_stage0:
+        description: "Confirm the trusted Stage 0 build on the dedicated home runner"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,14 +19,28 @@ concurrency:
 jobs:
   baseline:
     name: Build default Dakota
+    if: >-
+      github.repository == 'highwaytoit/dakota-niri' &&
+      github.ref == 'refs/heads/testing' &&
+      inputs.confirm_stage0 == true
     runs-on: [self-hosted, linux, x64, dakota-builder]
     timeout-minutes: 350
     permissions:
       contents: read
 
     steps:
+      - name: Verify trusted invocation
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "highwaytoit/dakota-niri"
+          test "$GITHUB_REF" = "refs/heads/testing"
+          echo "Trusted Stage 0 invocation verified."
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Verify runner prerequisites
         run: |
