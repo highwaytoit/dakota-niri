@@ -1,0 +1,98 @@
+name: Stage 0 Baseline Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_stage0:
+        description: "Confirm the trusted Stage 0 build on the dedicated home runner"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dakota-stage0-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Build default Dakota
+    if: >-
+      github.repository == 'highwaytoit/dakota-niri' &&
+      github.ref == 'refs/heads/testing' &&
+      inputs.confirm_stage0 == true
+    runs-on: [self-hosted, linux, x64, dakota-builder]
+    timeout-minutes: 350
+    permissions:
+      contents: read
+
+    steps:
+      - name: Verify trusted invocation
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "highwaytoit/dakota-niri"
+          test "$GITHUB_REF" = "refs/heads/testing"
+          echo "Trusted Stage 0 invocation verified."
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Verify runner prerequisites
+        run: |
+          set -euo pipefail
+          uname -a
+          free -h
+          df -h /
+          podman --version
+          just --version
+
+      - name: Generate local BuildStream config
+        uses: ./.github/actions/generate-bst-ci-config
+        with:
+          enable-remote-execution: "false"
+          enable-push: "false"
+
+      - name: Verify local execution and public caches
+        run: |
+          set -euo pipefail
+
+          if grep -Eq 'remote-execution:|storage-service:|cache\.projectbluefin\.io:11002' buildstream-ci.conf; then
+            echo "ERROR: Stage 0 BuildStream config contains private Bluefin remote execution/CAS settings."
+            exit 1
+          fi
+
+          grep -Fq 'https://gbm.gnome.org:11003' project.conf
+          grep -Fq 'https://cache.projectbluefin.io:11001' project.conf
+          grep -Fq 'https://cache.freedesktop-sdk.io:11001' patches/freedesktop-sdk/0001-project.conf-Add-GNOME-CAS-servers.patch
+
+          echo "Stage 0 uses local BuildStream execution with public project caches."
+
+      - name: Validate default BuildStream graph
+        env:
+          BST_FLAGS: --config /src/buildstream-ci.conf
+        run: just bst show --deps all oci/bluefin.bst
+
+      - name: Build and export default Dakota image
+        env:
+          BST_FLAGS: --config /src/buildstream-ci.conf
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          just build default 2>&1 | tee logs/stage0-build.log
+
+      - name: Verify local OCI image exists
+        run: sudo podman image inspect localhost/dakota:latest >/dev/null
+
+      - name: Upload Stage 0 build log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage0-baseline-build-log
+          path: logs/stage0-build.log
+          retention-days: 7
+          if-no-files-found: ignore
